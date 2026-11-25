@@ -9,13 +9,13 @@ let mode = 'viewer', endpoint = '', port = null, reader = null, reading = false,
 let latest = null, local = [], remote = [], lastLocalChart = 0, lastPaint = 0;
 let cloudBusy = false, uploadBusy = false, pending = null, lastAck = null, lastCloudOk = 0, cloudError = '', generation = 0;
 let message = '설정 후 연결할 수 있습니다.';
-const colors = ['#5cdbed','#ffbe70','#b8a6ff'];
+const colors = ['#5cdbed','#ffbe70','#b8a6ff','#84e6a3'];
 const formatter = new Intl.DateTimeFormat('ko-KR',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
 function clock(t){return formatter.format(new Date(t));}
-function validValues(v){return Array.isArray(v) && v.length===3 && v.every(n=>Number.isInteger(n)&&n>=0&&n<=1023);}
+function validValues(v){return Array.isArray(v) && v.length===4 && v.every(n=>Number.isInteger(n)&&n>=0&&n<=1023);}
 function parseLine(line){
-  // 기존 Sensor1:123\tSensor2:456\tSensor3:789 및 CSV 지원
-  const match = line.trim().match(/^Sensor1:\s*(\d+)\s+Sensor2:\s*(\d+)\s+Sensor3:\s*(\d+)$/i) || line.trim().match(/^(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$/);
+  // 기존 Sensor1:123\tSensor2:456\tSensor3:789 Sensor4:456 및 CSV 지원
+  const match = line.trim().match(/^Sensor1:\s*(\d+)\s+Sensor2:\s*(\d+)\s+Sensor3:\s*(\d+)\s+Sensor4:\s*(\d+)$/i) || line.trim().match(/^(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$/);
   if(!match) return null;
   const v=match.slice(1).map(Number);return validValues(v)?v:null;
 }
@@ -83,15 +83,23 @@ function drawChart(rows){
 }
 function render(){
   const rows=mode==='collector'?local:remote;const current=mode==='collector'?latest:rows.at(-1);const now=Date.now();
-  for(let i=0;i<3;i++){const n=current?.v[i];$('v'+i).textContent=n??'—';$('bar'+i).style.width=n===undefined?'0%':(100*n/1023)+'%';$('pct'+i).textContent=n===undefined?'원시 신호 —':`원시 신호 ${(100*n/1023).toFixed(1)}%`;}
+  for(let i=0;i<4;i++){const n=current?.v[i];$('v'+i).textContent=n??'—';$('bar'+i).style.width=n===undefined?'0%':(100*n/1023)+'%';$('pct'+i).textContent=n===undefined?'원시 신호 —':`원시 신호 ${(100*n/1023).toFixed(1)}%`;}
   $('lastSeen').textContent=current?`마지막 측정 ${clock(current.t)} · ${Math.max(0,Math.floor((now-current.t)/1000))}초 전`:'마지막 측정 —';
   if(mode==='collector'){if(reading&&latest&&now-latest.t<=3000)status('USB 수신 중','ok');else if(reading)status('센서 수신 대기','warn');else status('Arduino 미연결');}
   else if(cloudError)status('조회 오류','warn');else if(current&&now-current.t<=UPLOAD+POLL+15000)status('원격 수신 중','ok');else if(current)status('오래된 데이터','warn');else if(lastCloudOk)status('저장 데이터 없음');else status('연결 대기');
   $('cloudInfo').textContent=cloudError?'클라우드 오류 / 미확인':mode==='collector'?(lastAck?'저장 확인 '+clock(lastAck):'저장 대기'):(lastCloudOk?'조회 '+clock(lastCloudOk):'클라우드 —');
-  $('download').disabled=!rows.length;const body=$('rows');const frag=document.createDocumentFragment();if(!rows.length){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=4;td.textContent='수신 대기';tr.append(td);frag.append(tr);}else rows.slice(-10).reverse().forEach(r=>{const tr=document.createElement('tr');[clock(r.t),...r.v].forEach(n=>{const td=document.createElement('td');td.textContent=n;tr.append(td);});frag.append(tr);});body.replaceChildren(frag);drawChart(rows);
+  $('download').disabled=!rows.length;const body=$('rows');const frag=document.createDocumentFragment();if(!rows.length){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=5;td.textContent='수신 대기';tr.append(td);frag.append(tr);}else rows.slice(-10).reverse().forEach(r=>{const tr=document.createElement('tr');[clock(r.t),...r.v].forEach(n=>{const td=document.createElement('td');td.textContent=n;tr.append(td);});frag.append(tr);});body.replaceChildren(frag);drawChart(rows);
+  if(window.FloodMap) window.FloodMap.update({sample:current, now, fresh:!!current && now-current.t >= -5000 && now-current.t <= (mode==='collector'?3000:UPLOAD+POLL+15000) && (mode==='collector'?reading:!cloudError), source:mode==='collector'?'USB 직접 수신':'Google Sheets 원격 조회', error:mode==='viewer'?cloudError:''});
 }
-function download(){const rows=mode==='collector'?local:remote;if(!rows.length)return;const csv='timestamp_iso,A0,A1,A2\r\n'+rows.map(r=>[new Date(r.t).toISOString(),...r.v].join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='water-'+mode+'-'+new Date().toISOString().slice(0,10)+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+function download(){const rows=mode==='collector'?local:remote;if(!rows.length)return;const csv='timestamp_iso,A0,A1,A2,A3\r\n'+rows.map(r=>[new Date(r.t).toISOString(),...r.v].join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='water-'+mode+'-'+new Date().toISOString().slice(0,10)+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 $('viewerMode').onclick=()=>setMode('viewer');$('collectorMode').onclick=()=>setMode('collector');$('applyEndpoint').onclick=applyEndpoint;$('connect').onclick=connect;$('disconnect').onclick=disconnect;$('download').onclick=download;
 window.addEventListener('resize',render);setInterval(()=>{if(mode==='viewer')poll();},POLL);setInterval(upload,UPLOAD);setInterval(render,1000);
 try{$('endpoint').value=cfg.endpoint||localStorage.getItem('water.endpoint')||'';}catch{$('endpoint').value=cfg.endpoint||'';}
 if($('endpoint').value)applyEndpoint();else render();
+
+function showPage(page){
+  $('mapPage').hidden=page!=='map';$('adminPage').hidden=page!=='admin';
+  $('mapTab').setAttribute('aria-pressed',String(page==='map'));$('adminTab').setAttribute('aria-pressed',String(page==='admin'));
+  render();
+}
+$('mapTab').onclick=()=>showPage('map');$('adminTab').onclick=()=>showPage('admin');
